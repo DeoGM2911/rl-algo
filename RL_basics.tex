@@ -1,0 +1,500 @@
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+
+% Set the margins to 1
+\usepackage[margin=1in]{geometry}
+
+% Increase line height
+\linespread{1.25}
+
+\title{RL Basics - MDP, Value functions, Policy}
+\author{Dinh Dung Tran}
+\date{Dec 9, 2025}
+
+\begin{document}
+\maketitle
+
+\section*{Disclaimer} Please note that this is a work that only reflect my understanding of the materials that
+I'm learning from. It contains my own understanding and interpretations, which can obviously be wrong since I'm not the expert.
+However, for those who start learning about RL, I hope this can be a helpful resource. Credit to \href{https://www.youtube.com/@aiprism1155}{AI Prism} for the amazing 
+recordings of the Deep RL bootcamp. I highly recommend those who want to start learning about RL to watch 
+the videos. Though, it may help to have some understanding of probability and machine learning.
+
+%Table of summary
+\tableofcontents
+
+\newpage
+\section{Markov Decision Process}
+
+\subsection{Definition}
+
+In short, a Markov Decision Process (MDP) is a model of an environment in which an agent can take actions to influence the state of the environment, and receive rewards or punishments based on the state of the environment.
+
+There are 4 core components of an MDP:
+    \begin{itemize}
+        \item State Space $\mathcal{S}$
+        \item Action Space $\mathcal{A}$
+        \item Transition Probability $\Pr(s' | s, a)$
+        \item Reward Function $\mathcal{R}(s, a)$
+    \end{itemize}
+
+Note that \(\mathcal{S}\) and \(\mathcal{A}\) can either be discrete or continuous spaces. For example,
+the grid world environment has a discrete state space (the coordinates) and a discrete action space (up, down,
+left, right). On the other hand, the cart pole environment has a continuous state space (position, angle, velocity, angular velocity)
+and a continuous action space (acceleration).
+
+For the transition probability \(\Pr(s' | s, a)\), it is a probability distribution over the next state given the current state and action.
+It is a Markov property, meaning that the transition probability only depends on the current state and action, and not on the history of the environment.
+
+Lastly, the rewards funciton is a function that maps a state, an action, and the next state the action
+takes the agent to a value.
+
+Besides the core components, there are 3 more components of an MDP that we need to fully describe our problem:
+    \begin{itemize}
+        \item Discount Factor $0 \leq \gamma\leq 1$ which weights how important future rewards are.
+        \item Initial State $s_0 \in \mathcal{S}$
+        \item Horizon $H \in \mathbb{N}$ which is the maximum amount of steps the agent can take.
+    \end{itemize}
+
+\textbf{Goal}: Given an MDP \((\mathcal{S}, \mathcal{A}, \Pr(s'|s,a), \mathcal{R}, \gamma, s_0, H)\), we wish to perform a sequence of actions (trajectory) such that
+the expected sum of future rewards is maximized.
+
+With this in mind, let's also look into the definition of a policy. In short, a policy \(\pi: \mathcal{S} \rightarrow \mathcal{A}\)
+is a function that maps a state to an action. Note that, we can have stochastic policies, meaning that
+\(\pi(a|s)\) is a probability distribution over actions given a state. For the sake of simplicity, let's consider deterministic
+policies for now.
+
+\newpage
+\section{Value Function}
+
+\subsection{Definition}
+
+The value function is a function that maps a state to a value, representing the expected sum of future rewards starting from that state.
+That is, its formulation takes the form:
+\begin{equation}
+    V_H(s) = \mathbb{E}_{\pi}\bigg[\sum_{t=0}^{H} \gamma^t \mathcal{R}(s_{t+1}, a_t, s_t)\bigg]
+    \label{eq:value_function}
+\end{equation}
+Here, \(\pi\) means that we are taking the expected value with a given policy \(\pi\).
+Now, note that we can expand the value functions as follows:
+\begin{equation}
+    V_H(s) = \sum_{t=0}^{H} \sum_{s_{t+1}} \Pr(s_{t+1}|s_t,a_t)\gamma^t \mathcal{R}(s_{t+1}, a_t, s_t)
+    \label{eq:value_function_exp}
+\end{equation}
+where \(s_{t+1}\) is a possible next state by performing action \(a_t\) in state \(s_t\). Now
+
+One can deduct from the definition of a stochastic policy that \(\Pr(s'|s_t,a_t) = \sum_{a'} \pi(a'|s_t) \Pr(s'|s_t,a')\). Substituting this into \eqref{eq:value_function_exp}, we get:
+\begin{equation}
+    V_H(s) = \sum_{t=0}^{H} \sum_{s_{t+1}} \sum_{a_t} \pi(a_t|s_t) \Pr(s_{t+1}|s_t,a_t)\gamma^t \mathcal{R}(s_{t+1}, a_t, s_t)
+    \label{eq:value_function_exp2}
+\end{equation}
+
+However, to make the expression more readable, we will only use deterministic policy for now.
+
+\subsection{Bellman Equation}
+
+One thing to note is that if we are from state \(s_t\) and perform action \(a\) that leads us to state \(s_{t+1}\),
+then
+\begin{equation*}
+    V_{H}(s_t) \text{ can be estimated by } \mathcal{R}(s_{t+1}, a_t, s_t) + \gamma V_{H-1}(s_{t+1})
+\end{equation*}
+
+One can understand the Bellman equation as a recursive relationship between the value function at time step \(t\) and the value function at time step \(t+1\).
+This is because the value function at time step \(t+1\) is the expected sum of future rewards starting from state \(s_{t+1}\), and the value function at time step \(t\) is the expected sum of future rewards starting from state \(s_t\).
+The \(H\) turn into \(H-1\) because we have performed an action.
+
+Since we have a transition probability and we are maximizing, the correct (tabular) Bellman equation should be:
+\begin{equation}
+    V_{H}(s_t) = \max_{\substack{a_t}}\sum_{s_{t+1}} \Pr(s_{t+1}|s_t, a_t)\bigg(\mathcal{R}(s_{t+1}, a_t, s_t) + \gamma V_{H-1}(s_{t+1})\bigg)
+    \label{eq:bellman_tabular}
+\end{equation}
+
+Now, if one have some prior knowledge about Markov processes, most of the time, the model will reach an
+equilibrium point, meaning that the value function will converge to a fixed point. One can also view this statement
+as: as the agent has infinite amount of time, it will eventually perform actions that maximize the expected sum of future rewards.
+
+The same happens here. Consider the
+case when \(H \rightarrow \infty\), then \(V_H(s) \rightarrow V^*(s)\), where \(V^*(s)\) is the value function of the state \(s\)
+when the agent acts optimally (to maximize the expected sum of future rewards). Then, the Bellman equation states that:
+\begin{equation}
+    \forall s \in \mathcal{S}: V^*(s) = \max_{\substack{a}}\sum_{s'} \Pr(s'|s, a)\bigg(\mathcal{R}(s', a, s) + \gamma V^*(s')\bigg)
+    \label{eq:bellman_eq}
+\end{equation}
+where \(s'\) is the next state.
+
+\newpage
+\section{Action-Value function}
+
+\subsection{Definition}
+
+The action-value function is a function that maps a state and an action to a value, representing the expected sum of future rewards starting from that state and action.
+That is, its formulation takes the form:
+\begin{equation}
+    Q_H(s, a) = \mathbb{E}_{\pi}\bigg[\sum_{t=0}^{H} \gamma^t \mathcal{R}(s_{t+1}, a_t, s_t)\bigg]
+    \label{eq:action_value_function}
+\end{equation}
+where \(a_0=a\) and \(s_0=s\). Basically, the action-value function is the same as the value function, just that the first
+action is fixed. A simple relation is 
+\begin{equation}
+    V_H(s) = \max_{\substack{a}} Q_H(s, a)
+    \label{eq:V-Q_relation}
+\end{equation}
+
+\subsection{Bellman Equation}
+
+Similar to the value function, we also have the Bellman equation for the action-value function:
+\begin{equation}
+    Q_{H}(s, a) = \sum_{s'} \Pr(s'|s, a) \bigg(\mathcal{R}(s', a, s) + \gamma \max_{\substack{a'}} Q_{H-1}(s', a')\bigg)
+    \label{eq:bellman_action_value_tabular}
+\end{equation}
+and 
+\begin{equation}
+    Q^*(s, a) = \sum_{s'} \Pr(s'|s, a) \bigg(\mathcal{R}(s', a, s) + \gamma \max_{\substack{a'}} Q^*(s', a')\bigg)
+    \label{eq:bellman_action_value}
+\end{equation}
+where equation \eqref{eq:bellman_action_value} is \eqref{eq:bellman_action_value_tabular} when \(H \rightarrow \infty\).
+
+\newpage
+\section{Different approaches to RL}
+
+There are two main flavors of RL: \textbf{Dynamic Programming} and \textbf{Policy Optimization}. The goal of 
+both approaches is to find a policy that maximizes the expected sum of future rewards. However, the ways they
+obtain the result are different.
+
+\subsection{Dynamic Programming}
+
+If you have learn Algorithms, you'll probably have some sense that based on the Bellman equation \ref{eq:bellman_tabular} and
+\ref{eq:bellman_action_value_tabular}, we can use DP to solve the MDP. There are two main DP methods: 
+\textbf{Policy Iteration} and \textbf{Value Iteration}. One flavor of Value Iteration is the infamous
+\textbf{Q-learning}. We'll cover Q-learning and other methods in later chapters. Here, we want to focus in
+the differentiation between Policy Iteration and Value Iteration.
+
+\subsubsection{Value Iteration}
+
+Based on equation \ref{eq:bellman_tabular}, we can initialize a DP table with 2 dimensions: states and horizon. Below is
+the pseudocode for Value Iteration:
+
+\begin{algorithm}[H]
+    \caption{Value Iteration}
+    \begin{algorithmic}
+        \REQUIRE {Transition probability \(\Pr(s'|s, a)\), Reward function \(\mathcal{R}(s', a, s)\), Discount factor \(\gamma\), the horizon \(H\)}
+        \ENSURE {Value function \(V_H(s), \forall s \in \mathcal{S}\)}
+        \STATE Initialize \(V_0(s) = 0\) for all \(s \in \mathcal{S}\)
+        \FOR {\(h = 0\) to \(H\)}
+            \FOR {\(s \in \mathcal{S}\)}
+                \STATE \(V_h(s) \leftarrow \max_{\substack{a}}\sum_{s'} \Pr(s'|s, a)\bigg(\mathcal{R}(s', a, s) + \gamma V_{h-1}(s')\bigg)\)
+                \STATE \(\pi_h(s) \leftarrow \arg \max_{\substack{a}}\sum_{s'} \Pr(s'|s, a)\bigg(\mathcal{R}(s', a, s) + \gamma V_{h-1}(s')\bigg)\)
+            \ENDFOR
+        \ENDFOR
+        \RETURN \(V_H(s), \pi_H(s)\)
+    \end{algorithmic}
+    \label{alg:value_iteration}
+\end{algorithm}
+
+As \(H \rightarrow \infty\), the value function will converges. There is a theorem about this, 
+which I don't go into details here. One can google about it. In short, the theorem states that
+algorithm \ref{alg:value_iteration} will converge to the optimal value function and 
+\[\forall s \in \mathcal{S}: V^*(s) = \max_{\substack{a}}\sum_{s'} \Pr(s'|s, a)\bigg(\mathcal{R}(s', a, s) + \gamma V^*(s')\bigg)\]
+
+One can check this file  for the implementation of Value Iteration. Note that
+I vectorize the Bellman equation to make it faster.
+
+\subsubsection{Policy Iteration}
+
+In contrast to Value Iteration, Policy iteration is a two-step process: policy evaluation and policy improvement. Policy evaluation is the same as value iteration,
+while policy improvement is the same as policy iteration.
+
+Here, given a policy \(\pi\), we can evaluate a policy based on the resulted value function.
+\begin{equation}
+    V_t^\pi(s) = \sum_{s'} \Pr(s'|s, \pi(s))\bigg(\mathcal{R}(s', \pi(s), s) + \gamma V_{t-1}^\pi(s')\bigg)
+\end{equation}
+Note that our policy have `fixed' our action. Again, one can extend this to stochastic policy.
+
+\begin{algorithm}[H]
+    \caption{Policy Iteration}
+    \begin{algorithmic}
+        \REQUIRE {Transition probability \(\Pr(s'|s, a)\), Reward function \(\mathcal{R}(s', a, s)\), Discount factor \(\gamma\), number of iterations \(T\)}
+        \STATE Initialize \(\pi_0\) randomly
+        \STATE Compute \(V^{\pi_0}(s), \forall s \in \mathcal{S}\)
+        \FOR {\(t = 1\) to \(T\)}
+            \STATE Improve: \(\forall s \in \mathcal{S}: \pi_{t}(s) \leftarrow \arg \max_{\substack{a}}\sum_{s'} \Pr(s'|s, a)\bigg(\mathcal{R}(s', a, s) + \gamma V^{\pi_{t-1}}(s')\bigg)\)
+            \STATE Evaluation: Compute \(V^{\pi_t}(s), \forall s \in \mathcal{S}\) 
+        \ENDFOR
+        \RETURN \(V_T(s), \pi_T(s)\)
+    \end{algorithmic}
+    \label{alg:policy_iteration}
+\end{algorithm}
+
+One can check this file for the implementation of Policy Iteration. Note that
+I vectorize the Bellman equation to make it faster.
+
+Again, there's a theorem that states that Policy Iteration will converge to the optimal policy and value function, but I won't cover it here.
+
+\subsection{Policy Optimization}
+
+There are two main flavors of Policy Optimization: \textbf{DFO/Evolution} and \textbf{Policy Gradients}.
+We won't go into details about DFO/Evolution.
+
+\subsubsection{Policy Gradients}
+
+I will provide the details when we cover Policy Gradients.
+
+\subsubsection{Others}
+
+There is a class of methods called Actor-Critic methods. All of value iteration, policy iteration, and policy gradient are special cases of Actor-Critic methods.
+In simple sense, one given policy is our actor, which interact with the environment and collect data.
+We will then evaluate (critics) the policy based on the collected data and improve.
+
+\newpage
+\section{Q-Learning - Sample-based Approximation}
+
+\subsection{Motivation and Algorithm}
+
+A down-side with Value Iteration and Policy Iteration is that they require a complete knowledge of the environment.
+That is we need to know the transition probability and reward function, which in real life, we rarely know. Furthermore,
+due to the DP nature, we can only really solve problems with small state spaces and action spaces.
+
+So, how can we deal with this? It would be nice if one have some knowledge regarding estimates, but in short, if we have
+some statistics we want to estimate, we can create some `estimators' which are random variables.
+An estimator is unbiased if its expected value is equal to the true value. That is if our true statistics
+is \(q\) and our estimator is \(\hat{q}\), then \(\mathbb{E}[\hat{q}] = q\).
+
+With this in minds, consider the following estimate for the value function:
+\[\hat{V}(s) = \mathcal{R}(s', a, s) + \gamma V(s')\]
+
+Note that, \(s'\) is a random variable. And thus, if we take the expectation, we will arrive at our good old
+value function. Hence, this is an unbiased estimator. This inspires the following algorithm
+
+\begin{algorithm}[H]
+    \caption{Sample-based Approximation}
+    \begin{algorithmic}
+        \REQUIRE A way to interact with the environment which will get us the reward of an action and the next state. 
+        \STATE Sample \(s' \sim \Pr(s' | s, a)\)
+        \STATE \(\hat{V}(s) \leftarrow \mathcal{R}(s', a, s) + \gamma \hat{V}(s')\)
+    \end{algorithmic}
+\end{algorithm}
+
+Now, it's worth noting that we're define this recursively. However, the key idea is that, if we can take a bunch of
+transition samples \((s, a, s', r=\mathcal{R}(s', a, s))\), we can estimate the value function by taking the mean of the estimators.
+Similarly, we can create an estimator for the action-value function \(Q(s, a)\). This gives rise to Q-Learning.
+
+\begin{algorithm}[H]
+    \caption{Q-Learning}
+    \begin{algorithmic}
+        \REQUIRE A way to interact with the environment which will get us the reward of an action and the next state. 
+        \STATE Initialize \(Q(s, a) = 0, \forall (s, a) \in \mathcal{S} \times \mathcal{A}\)
+        \STATE Initialize an starting state \(s \leftarrow s_0\)
+        \FOR {\(t = 1,2,3,\ldots\) until convergence}
+            \STATE Sample an action \(a\), get the next state \(s'\), and the reward \(r\)
+            \IF {\(s'\) is terminal}
+                \STATE Initialize a new starting state \(s \leftarrow s^*\)
+                \STATE \(\texttt{target} \leftarrow r\)
+            \ELSE
+                \STATE \(\texttt{target} \leftarrow r + \gamma \max_{\substack{a'}} Q(s', a')\)
+            \ENDIF
+            \STATE \(Q(s, a) \leftarrow Q(s, a) + \alpha(t) (\texttt{target} - Q(s, a))\)
+            \STATE \(s \leftarrow s'\) if not terminal else \(s \leftarrow s^*\)
+        \ENDFOR
+        \RETURN \(Q(s, a)\)
+    \end{algorithmic}
+\end{algorithm}
+
+There are some uncertainty in the algorithm. Mainly, how do we sample actions? If always choose the action
+with the highest Q-value, we will get stuck in a local optimum. If we always choose a random action, we will not
+exploit the best action. To avoid this, we can use an epsilon-greedy policy.
+
+\begin{algorithm}[H]
+    \caption{\(\epsilon\)-greedy}
+    \begin{algorithmic}
+        \REQUIRE \(Q(s, a), s, \epsilon(t)\) where \(\epsilon(t)\) is a time-dependent value between 0 and 1.
+        \STATE \(x \leftarrow \texttt{random}(0, 1)\)
+        \IF {\(x < \epsilon(t)\)}
+            \STATE \(a \leftarrow \texttt{random}(\mathcal{A})\)
+        \ELSE
+            \STATE \(a \leftarrow \arg \max_{\substack{a'}} Q(s, a')\)
+        \ENDIF
+        \RETURN \(a\)
+    \end{algorithmic}
+\end{algorithm}
+
+Note that we want \(\epsilon(t)\) to be close to 1 initially and decreasing over time. This ensures that 
+we explore initially and then exploit once the agent understand the environment. In practice, this is pretty good.
+
+\subsection{Properties of Q-Learning}
+
+Q-Learning is an off-policy algorithm, that is we learn the Q-value from a non-optimal policy. Furthermore, since we are iterating and improve
+our estimates, this belongs to the value iteration family.
+
+Now, to ensure convergence, we want our learning rate \(\alpha(t)\) to be close to 1 initially and decreasing over time. A general
+guidelines is to choose \(\alpha(t)\) such that
+\[\begin{aligned}
+    \sum_{t=0}^\infty \alpha(t) = \infty & & \text{ and } & & \sum_{y=0}^{\infty} \alpha^2(t) < \infty
+\end{aligned}\]
+
+\subsection{Temporal Difference Learning}
+
+In Q-Learning, we try to estimate the Q-value. What's about the value function? It turns out, we can
+use a similar idea to estimate the value function. Of course, this is motivated by the unbiased estimator
+discussion we have earlier. This is called Temporal Difference Learning.
+
+\begin{equation}
+    V_t^{\pi}(s) \leftarrow V_{t-1}^{\pi}(s) + \alpha(t) (r_t + \gamma V_{t+1}^{\pi}(s') - V_t^{\pi}(s))
+    \label{eq:td-learning}
+\end{equation}
+
+We'll repeat this process \ref{eq:td-learning} until convergence. Again, we will also update our policy by
+\[\pi_{t}(s) \leftarrow \arg \max_{\substack{a}} \sum_{s'} \Pr(s'|s,a) \bigg(\mathcal{R}(s', a, s) + \gamma V^{\pi_{t-1}}(s')\bigg)\]
+
+Note that the subscript for \ref{eq:td-learning} is for different time step when evaluate the policy, while the superscript for the
+policy update rule is the `outer' iteration. 
+\newpage
+\section{Deep Reinforcement Learning}
+
+\subsection{Motivation}
+
+Though Q-Learning is good, there is a major limitation with scalability. Will Q-Learning work
+for continuous spaces (especially when we don't want dicretize the space)? How about very large state spaces?
+
+Looking over to our friend supervised learning, maybe, instead of trying hard to use a table,
+maybe we can learn some kind of functions that can take a state and a action as input and output a value. That function
+may also take learnable parameters \(\theta\). This is called Approximate Q-Learning.
+
+We will then use gradient descent to update the parameters \(\theta\) to minimize the loss function \(\mathcal{L}(\theta; s, a) 
+= \dfrac{1}{2}(r + \gamma \max_{\substack{a'}} Q(s', a') - Q(s, a))^2\). The update rule is
+\[\theta_{t} \leftarrow \theta_{t-1} - \alpha(t) \nabla_{\theta} \mathcal{L}(\theta; s, a)\]
+
+We can see that Q-Learning is actually a special case of Approximate Q-Learning where
+our function is parameterized by \(\theta \in \mathbb{R}^{|\mathcal{S}| \times |\mathcal{A}|}\).
+
+But is this enough? Not really.
+
+\subsection{Algorithm}
+
+There is still a major problem: stability. If one looks at the loss function, 
+we can see that our target is non-stationary (dependent on \(Q(\cdot)\)). Furthermore,
+in supervised learning, we often assume that the data points are i.i.d (independently and identically distributed).
+This is not the case in RL, where picking a starting point may affect the overall trajectory.
+All of these problems can lead to unstable or even diverging behavior.
+
+To address this, there are 2 basic strategies: 
+\begin{itemize}
+    \item Experience Replay
+    \item Target Network
+\end{itemize}
+
+\subsubsection{Experience Replay}
+
+Note that, one way to mitigate the "non-stationary" target and reduce the trajectory-dependence is to use experience replay. 
+The idea is to store a fixed length trajectory, which are a sequence of transitions. Then, transitions are sampled from
+the replay buffer and used for gradient descent. This methods make the data distribution more stable than the online one.
+
+\subsubsection{Target Network}
+
+The next solution used is a target network. The idea is to have a target network that is updated less often than the
+online network. This helps to stabilize the learning process by making the target more `stationary'. 
+
+\subsubsection{Native Deep Q-Network (DQN)}
+
+With the two solutions in mind, we can create an algorithm that mimics Approximate Q-learning but is
+much more stable. This is called Deep Q-Network (DQN).
+
+\begin{algorithm}
+    \caption{DQN}
+    \begin{algorithmic}
+        \REQUIRE A way to interact with the environment, number of episodes \(M\), number of time steps \(T\)
+        \STATE Initialize replay buffer \(\mathcal{D}\) of length \(N\)
+        \STATE Initialize the action-value function \(Q(s, a; \theta)\) for random weights \(\theta\)
+        \STATE Initialize the target network \(\hat{Q}(s, a; \hat{\theta})\) with weights \(\hat{\theta}=\theta\) initially.
+        \FOR{episode \(0, 1, 2, \ldots, M\)}
+            \STATE Initialize the environment and get the initial state \(s_0\)
+            \FOR{time step \(t=0, 1, 2, \ldots, T\)}
+                \STATE Choose action \(a_t\) using \(\epsilon\)-greedy policy
+                \STATE Take action \(a_t\) and observe the next state \(s_{t+1}\) and reward \(r_t\)
+                \STATE Store the transition \((s_t, a_t, r_t, s_{t+1})\) in the replay buffer. One need to keep track if this is terminal to compute the target.
+            \IF{the replay buffer is full} 
+                \STATE Sample a batch of \((s_j, a_j, r_j, s_{j+1}) \in \mathcal{D}\) transitions from the replay buffer.
+                \STATE Compute the target \(y_j = r_j + \gamma \max_{\substack{a'}} Q(s_{j+1}, a'; \hat{\theta})\) for each sample in the batch.
+                \STATE Update the action-value function \(Q(s, a; \theta)\) using the sampled transitions with gradient descent.
+                \STATE For every \(C\) steps, update the target network \(\hat{Q}(s, a; \hat{\theta})\) with weights \(\hat{\theta}=\theta\)
+            \ENDIF
+            \ENDFOR
+        \ENDFOR
+    \end{algorithmic}
+\end{algorithm}
+
+Now, there are some niche details about the algorithm itself. First, the loss function
+used here is the Huber loss, which penalized large errors less severely than MSE. This is
+to make sure we still let the model make errors to explore the environment. The Huber loss is defined as 
+\begin{equation}
+    \mathcal{L}_\delta(y, \hat{y}) = \begin{cases}
+        \frac{1}{2}(y - \hat{y})^2 & \text{if } |y - \hat{y}| \leq \delta \\
+        \delta (|y - \hat{y}| - \frac{1}{2}\delta) & \text{otherwise}
+    \end{cases}
+    \label{eq:huber_loss}
+\end{equation}
+
+Secondly, the optimizer we used for DQN is RMSProp or Adam, which in practice work better
+than SGD. Lastly, the \(\epsilon(t)\) parameter in sampling an action is annealed over time to 
+reduce exploration (\(\epsilon(0) = 1 \rightarrow \epsilon(10^6) \approx 0.05\) where \(t\) is the number of frames or steps).
+
+\subsubsection{DQN Variants}
+
+\paragraph{6.2.4.1 Double DQN}
+
+Double DQN is a variant of DQN that addresses the overestimation problem in DQN. 
+Now, note that when we take \(\max_{\substack{a}} Q(s', a'; \hat{\theta})\), we are using the target network to estimate the value of the next state. 
+This can lead to overestimation (for some actions) if the target network is not updated often enough. To address this,
+we will choose action based on the online network, but use the target network to evaluate such action.
+This means that the term \(y_j - \hat{y_j}\) becomes 
+\[
+    r_j + \gamma Q(s', \arg \max_{\substack{a'}} Q(s', a'; \theta
+    ); \hat{\theta}) - Q(s, a; \theta)
+\]
+
+The \(\arg \max\) is taken with respect to the online network (\(\theta\)), while the evaluation is done with the target network (\(\hat{\theta}\)).
+
+\paragraph{6.2.4.2 Prioritized Experience Replay}
+
+Prioritized Experience Replay is a variant of DQN that boosts convergence rate.
+
+Instead of sampling data from the replay buffer u.a.r., we will sample data based on the
+Bellman error of the transition. The Bellman error is defined as 
+\[
+    \delta_j = |y_j - \hat{y_j}| = |r_j + \gamma \max_{\substack{a'}} Q(s_{j+1}, a'; \hat{\theta}) - Q(s_j, a_j; \theta)|
+\]
+This will lead to faster convergence rate.
+
+\paragraph{6.2.4.3 Dueling DQN}
+
+Dueling DQN is a variant of DQN that also deals with the overestimation problem.
+
+Now, instead of output the action-value function directly, we will output the value function \(V(s)\) and the advantage function \(A(s, a)\).
+The advantage function, as the name suggests, show how advantagous an action is compared to some baseline, in this case, the value function.
+
+Then, the action value function \(Q(s,a)=V(s) + A(s, a)\). However, in dueling DQN, we
+compute the action-value function by
+\[
+    Q(s, a) = V(s) + A(s, a) - \dfrac{1}{|\mathcal{A}|} \sum_{a \in \mathcal{A}} A(s, a)
+\]
+
+\paragraph{6.2.4.4 Noisy Net for Exploration}
+
+Noisy Net for Exploration is a variant of DQN that addresses the exploration problem in DQN.
+
+Inspired by the idea of adding noises to make the model more robust (data augmentation), we will add noise to the parameters
+so that the agent will tends to explore more than to exploit initially. Formally, the noisy linear layer is defined as 
+\[
+    \text{NoisyLinear}(x) = (\mu^w + \sigma^w \epsilon^w)x + (\mu^b + \sigma^b \epsilon^b)
+\]
+where \(\epsilon^w\) and \(\epsilon^b\) are independent random variables 
+sampled from a standard normal distribution. The \(\sigma^w\) and \(\sigma^b\) are learnable parameters
+that are used to control the noise.
+
+\newpage
+\section{Policy Gradients}
+\end{document}
