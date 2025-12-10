@@ -5,6 +5,7 @@
 \usepackage{hyperref}
 \usepackage{algorithm}
 \usepackage{algorithmic}
+\usepackage{makecell}
 
 % Set the margins to 1
 \usepackage[margin=1in]{geometry}
@@ -497,4 +498,309 @@ that are used to control the noise.
 
 \newpage
 \section{Policy Gradients}
+
+We will now move on to the next class of algorithms: policy gradients. To set up the framework, 
+we will now use a more `flexible' policy - stochastic policy \(\pi_\theta(u|s)\). To avoid confusion, we will
+now denote action by \(u\).
+
+Compared to the old `deterministic' policy, the stochastic policy allows for a much smoother optimization problem.
+That is instead of a shift from one `spiky' distribution to another, we can change the probability mass or density
+of the action, which allows for much smoother optimization landscape.
+
+Nonetheless, the ultimate goal is still to find the optimal policy that maximizes the expected return 
+\(\mathbb{E}_{u \sim \pi_\theta(u|s)}[\mathcal{R}(\tau)]\) for some trajectory \(\tau\) which starts at some state \(s_0\).
+
+\subsection{Why Policy Gradients?}
+
+Before going into what policy gradients are, let's first think about why we use policy gradients. Compared to using
+the value function \(V(s)\) and/or action-value function \(Q(s,a)\), policy gradients allows us to directly optimize the policy.
+In value-based methods, we either need a dynamic models (for \(V(s)\)) or an efficient way to 
+compute \(\arg \max_{\substack{a}} Q(s, a; \theta)\) for some state \(s\). However, as the problem scales larger,
+these approaches aren't that good. Table \ref{tab:value_based_vs_policy_gradient} show the comparison between value-based methods and policy gradients.
+
+\begin{table}[h]
+    \centering
+    \begin{tabular}{|c|c|c|}
+        \hline
+        \textbf{ } & \textbf{Policy Gradients} & \textbf{Dynamic Programming} \\
+        \hline
+        \text{Concepts} & \text{Optimize directly what we care about} & \makecell{Indirect, exploit problem structure \\ (Bellman Eq.), self-consistent} \\
+        \hline
+        \text{Empirical} & \makecell{Compatible with rich architectures \\(parameterized policy); versatile; auxiliry objectives} & \makecell{Exploration and off-policy learning;\\ sample-efficient (if works)} \\
+        \hline
+    \end{tabular}
+    \caption{Comparison of Value-based (DP) Methods and Policy Gradients}
+    \label{tab:value_based_vs_policy_gradient}
+\end{table}
+
+\subsection{Likelihood Ratio Policy Gradients - REINFORCE}
+
+Let \(\tau\) be a trajectory \((s_0, u_0, s_1, u_1, \ldots, s_H, u_H)\). Then, define
+
+\begin{equation}
+    \mathcal{R}(\tau) = \sum_{t=0}^{H-1} \mathcal{R}(s_t, u_t)
+    \label{eq:reward_trajectory}
+\end{equation}
+to be the reward of the trajectory \(\tau\). Then, the utility function is defined as 
+\begin{equation}
+    U(\theta) = \mathbb{E}_{\tau \sim \pi_\theta}[\mathcal{R}(\tau)] = \sum_{\tau} \Pr(\tau; \theta)\mathcal{R}(\tau)
+    \label{eq:utility_function}
+\end{equation}
+to be the expected reward of the policy \(\pi_\theta\) over the distribution of the trajectory \(\tau\). 
+The goal is to find \(\theta\) such that \(U(\theta)\) is maximized.
+
+\subsection{Policy Gradient Theorem}
+
+Since we're maximize \(U(\theta)\) w.r.t. \(\theta\), we can try taking the gradient of \(U(\theta)\) w.r.t. \(\theta\).
+
+\[
+    \begin{aligned}
+        \nabla_\theta U(\theta) &= \nabla_\theta \sum_{\tau} \Pr(\tau; \theta)\mathcal{R}(\tau) \\
+        &= \sum_{\tau} \nabla_\theta \Pr(\tau; \theta)\mathcal{R}(\tau) \\
+        &= \sum_{\tau} \dfrac{\Pr(\tau; \theta)}{\Pr(\tau; \theta)}\nabla_\theta \Pr(\tau; \theta)\mathcal{R}(\tau) \\
+        &= \sum_{\tau} \Pr(\tau; \theta)\dfrac{\nabla_\theta \Pr(\tau; \theta)}{\Pr(\tau; \theta)}\mathcal{R}(\tau) \\
+        &= \sum_{\tau} \Pr(\tau; \theta)\nabla_\theta \log \Pr(\tau; \theta)\mathcal{R}(\tau) \\
+        &= \mathbb{E}_{\tau \sim \pi_\theta}[\nabla_\theta \log \Pr(\tau; \theta)\mathcal{R}(\tau)]
+    \end{aligned}
+\]
+
+This is the policy gradient theorem. It states that the gradient of the expected reward w.r.t. the policy parameters is
+equal to the expected gradient of the log probability of the trajectory w.r.t. the policy parameters.
+
+\begin{equation}
+    \nabla_\theta U(\theta) = \mathbb{E}_{\tau \sim \pi_\theta}[\nabla_\theta \log \Pr(\tau; \theta)\mathcal{R}(\tau)]
+    \label{eq:policy_gradient_theorem}
+\end{equation}
+
+One thing worth mentioning is the interpretation of this gradient. Now, say we have two trajectories \(\tau_1\) and
+\(\tau_2\) and \(\mathcal{R}(\tau_1) > 0\) and \(\mathcal{R}(\tau_2) < 0\). 
+Then, the gradient \(\nabla_\theta \log \Pr(\tau_1; \theta)\mathcal{R}(\tau_1)\)
+is positive while \(\nabla_\theta \log \Pr(\tau_2; \theta)\mathcal{R}(\tau_2)\) is negative. One implication is that
+the gradient increase the likelihood of the trajectory with positive reward and decrease the likelihood of the trajectory with negative reward. 
+However, it's worth noting that the gradient only changes the probability, not the trajectory itself.
+
+\subsection{REINFORCE - `Vanilla' Policy Gradients}
+
+\subsubsection{Gradient Estimation}
+
+With this in mind, we can use gradient descent with an approximation of the gradient \(\hat{g}  \approx \nabla_\theta U(\theta)\).
+The key problem is now how to estimate \(\nabla_\theta U(\theta)\). In fact, the core issue is to estimate \(\nabla_\theta \log \Pr(\tau; \theta)\).
+Let's open the gradient and see what we get
+\[
+    \begin{aligned}
+        \nabla_\theta \log \Pr(\tau; \theta) &= \nabla_\theta \log \bigg[\prod_{t=0}^{H-1} \Pr(s_{t+1} | s_t, u_t)\pi_\theta(u_t|s_t)\bigg] \\
+        &= \nabla_\theta \sum_{t=0}^{H-1} \log \Pr(s_{t+1} | s_t, u_t) + \log \pi_\theta(u_t|s_t) \\
+        &= \sum_{t=0}^{H-1} \nabla_\theta \log \Pr(s_{t+1} | s_t, u_t) + \nabla_\theta \log \pi_\theta(u_t|s_t)
+    \end{aligned}
+\]
+
+Now, note that the transition probability \(\Pr(s_{t+1} | s_t, u_t)\) is fixed and doesn't depend on the policy parameters \(\theta\). Thus, it's gradient w.r.t. \(\theta\) is zero. 
+Therefore,
+\[
+    \begin{aligned}
+        \nabla_\theta \log \Pr(\tau; \theta) &= \sum_{t=0}^{H-1} \nabla_\theta \log \pi_\theta(u_t|s_t)
+    \end{aligned}
+\]
+
+Now, there's also a different way to arrive at this. Consider 
+\begin{equation}
+    U(\theta) = \mathbb{E}_{\tau \sim \theta_{\text{old}}}\bigg[\dfrac{\Pr(\tau|\theta)}{\Pr(\tau|\theta_{\text{old}})}\mathcal{R}(\tau)\bigg]
+    \label{eq:utility_function_2}
+\end{equation}
+
+Here, the trajectories \(\tau\) are sampled from the old policy \(\theta_{\text{old}}\); thus, we add a correction term \(\dfrac{1}{\Pr(\tau|\theta_{\text{old}})}\).
+
+We can now take the gradient of \(U(\theta)\) w.r.t. \(\theta\) at the point \(\theta=\theta_{\text{old}}\) to get
+\begin{align}
+    \nabla_\theta U(\theta) \vert_{\theta=\theta_{\text{old}}} &= \mathbb{E}_{\tau \sim \theta_{\text{old}}}\bigg[\nabla_\theta \dfrac{\Pr(\tau|\theta)\vert_{\theta=\theta_{\text{old}}}}
+    {\Pr(\tau|\theta_{\text{old}})}\mathcal{R}(\tau)\bigg] \\
+    &= \mathbb{E}_{\tau \sim \theta_{\text{old}}}\bigg[\nabla_\theta \log \Pr(\tau|\theta)\vert_{\theta=\theta_{\text{old}}}\mathcal{R}(\tau)\bigg]
+    \label{eq:utility_gradient}
+\end{align}
+
+This is precisely the policy gradient theorem. We can see that both formulas give us the same gradient value at \(\theta=\theta_{\text{old}}\).
+We can again break down the probability and arrive at the same result above.
+
+\subsubsection{Stablizing Techniques \label{sec:stablizing_techniques}}
+
+Now, with that in minds, there is still a problem that we need to address. Though the estimation is unbiased, it is also very noisy. To explain this,
+consider the gradient estimator
+\[
+    \hat{g} = \dfrac{1}{m}\sum_{i=1}^{m} \nabla_\theta \log \Pr(\tau_i|\theta)\mathcal{R}(\tau_i)
+\]
+
+Note that this estimation is based on the set of trajectories \(\tau_i\). What happens if we collect some samples, and all of them have positive rewards?
+Similarly, what if we collect some samples, and all of them have negative rewards? This means that the estimation is highly sensitive to noise, and one way to address
+this is to collect a huge amount of data. However, computation resources aren't infinite, and we need to find a balance between the number of samples and the 
+variance of the gradient estimator.
+
+To reduce the variance, we can reduce the scale of the values that the gradient can take (\(\mathbb{V}(X) = \mathbb{E}[X^2] - \mathbb{E}[X]^2\)). 
+One way to do this is to use a baseline. To be more specific, we want to `center' the rewards and ask the question: how good is this reward compared to the average reward?
+
+\paragraph{Baseline}
+
+Formally, the estimation becomes
+\[
+    \hat{g} = \dfrac{1}{m}\sum_{i=1}^{m} \nabla_\theta \log \Pr(\tau_i|\theta)(\mathcal{R}(\tau_i) - b)
+\]
+where \(b\) is the baseline. One key observation is that this estimator is still unbiased! Below is a proof:
+
+\[
+    \begin{aligned}
+        \mathbb{E}_\tau[\nabla_\theta \log \Pr(\tau|\theta) b] &= \sum_{\tau} \Pr(\tau|\theta)\nabla_\theta \log \Pr(\tau|\theta) b \\
+        &= \sum_{\tau} \Pr(\tau|\theta)\dfrac{\nabla_\theta \Pr(\tau|\theta)}{\Pr(\tau|\theta)} \mathbb{E}_\tau[b] \\
+        &= \sum_{\tau} \nabla_\theta \Pr(\tau|\theta) \mathbb{E}_\tau[b] \\
+        &= \nabla_\theta \Pr(\tau|\theta) \mathbb{E}_\tau[b] \\
+        &= \nabla_\theta \mathbb{E}_\tau[b]
+    \end{aligned}
+\]
+
+Now, if the baseline is independent of the policy (or the actions), then \(\nabla_\theta \mathbb{E}_\tau[b]=0\), and the gradient estimator is unbiased.
+Note that \(b\) can depend on the states \(s\). With some hindsight, we will see that the value function \(V^\pi(s)\) is a good baseline.
+
+\paragraph{Temporal Structure}
+
+To further reduce the variance (reduce the scale), we can make use of the temporal structure of the trajectory.
+Consider the current estimate
+\[
+    \begin{aligned}
+        \hat{g} &= \dfrac{1}{m}\sum_{i=1}^{m} \sum_{t=0}^{H-1}\nabla_\theta \log \pi_\theta(u^{(i)}_t|s^{(i)}_t)\bigg(\sum_{k=0}^{t-1} \mathcal{R}(s^{(i)}_k, u^{(i)}_k) +
+        \sum_{k=t}^{H-1} \mathcal{R}(s^{(i)}_k, u^{(i)}_k) - b\bigg) \\
+    \end{aligned}
+\]
+
+Note that we can remove the term \(\sum_{k=0}^{t-1} \mathcal{R}(s^{(i)}_k, u^{(i)}_k)\) since the reward obtained before time step
+\(t\) is independent of the action at time step \(t\). More formally, consider
+
+\[
+    \begin{aligned}
+        \mathbb{E}_\tau\bigg[\nabla_\theta\log \pi_\theta(u_t|s_t) \sum_{k=0}^{t-1} \mathcal{R}(s^{(i)}_k, u^{(i)}_k)\bigg] &= \sum_{k=0}^{t-1} \mathcal{R}(s^{(i)}_k, u^{(i)}_k) \mathbb{E}_\tau\bigg[\nabla_\theta\log \pi_\theta(u_t|s_t)\bigg] \\
+        &= \sum_{k=0}^{t-1} \mathcal{R}(s^{(i)}_k, u^{(i)}_k) \mathbb{E}_\tau\bigg[\nabla_\theta \log \pi_\theta(u_t|s_t)\bigg] \\
+        &= \sum_{k=0}^{t-1} \mathcal{R}(s^{(i)}_k, u^{(i)}_k) \mathbb{E}_\tau\bigg[\dfrac{\nabla_\theta \pi_\theta(u_t|s_t)}{\pi_\theta(u_t|s_t)}\bigg] \\
+        &= \sum_{k=0}^{t-1} \mathcal{R}(s^{(i)}_k, u^{(i)}_k) \nabla_\theta \mathbb{E}[1] = 0
+    \end{aligned}
+\]
+
+Thus, we can simpify our gradient estimator to
+\[
+    \begin{aligned}
+        \hat{g} &= \dfrac{1}{m}\sum_{i=1}^{m} \sum_{t=0}^{H-1}\nabla_\theta \log \pi_\theta(u^{(i)}_t|s^{(i)}_t)\bigg(\sum_{k=t}^{H-1} \mathcal{R}(s^{(i)}_k, u^{(i)}_k) - b\bigg)
+    \end{aligned}
+\]
+
+But, what is this term \(\sum_{i=t}^{H-1}\mathcal{R}(s^{(i)}_k, u^{(i)}_k)\)? This is precisely the
+action-value function for state \(s_t\) under policy \(\pi_\theta\), denoted as \(Q_\theta(s_t, u_t)\). Note that, for
+stability, a discount factor is often added, i.e.
+
+\begin{align}
+    \hat{g} &= \dfrac{1}{m}\sum_{i=1}^{m} \sum_{t=0}^{H-1}\nabla_\theta \log \pi_\theta(u^{(i)}_t|s^{(i)}_t)\bigg(\sum_{k=t}^{H-1} \gamma^{k-t}\mathcal{R}(s^{(i)}_k, u^{(i)}_k) - b\bigg) \\
+    &= \dfrac{1}{m}\sum_{i=1}^{m} \sum_{t=0}^{H-1}\nabla_\theta \log \pi_\theta(u^{(i)}_t|s^{(i)}_t)\bigg(Q^{\pi, \gamma}(s^{(i)}_t, u^{(i)}_t) - b\bigg)
+    \label{eq:actor-critic}
+\end{align}
+
+
+Now, the last puzzle is the value of \(b\). There are some
+common choices. They are
+
+\begin{itemize}
+    \item Constant baseline: \(b=\mathbb{E}[\mathcal{R}(\tau)]=\dfrac{1}{m}\sum_{i=1}^{m}\mathcal{R}(\tau_i)\)
+    \item Optimal (minimum variance) function: \(b=\dfrac{\sum_i (\nabla_\theta\log \Pr(\tau_i|\theta))^2\mathcal{R}(\tau_i)}{\sum_i (\nabla_\theta\log \Pr(\tau_i|\theta))^2}\)
+    \item Time-dependent function: \(b(t) = \dfrac{1}{m} \sum_{i=1}^{m}\sum_{k=t}^{H-1}\mathcal{R}(s^{(i)}_k, u^{(i)}_k)\)
+    \item Value (State-dependent) function: \(b=V^\pi(s_t)\)
+\end{itemize}
+
+Among these, the value function is the one that makes sense. Why? Because \(A(s_t, u_t) = Q^\pi(s_t, u_t) - V^\pi(s_t)\), which is the advantage function, denotes 
+how advantagous we are by choosing action \(u_t\) in state \(s_t\) compared to the `current' best return we know we can get from state \(s_t\).
+
+So, the problem now boils down to estimating \(V_\phi^\pi(s)\) (\(\phi\) is the parameters
+for estimating the value function). We have seen the temporal difference learning before (see equation \ref{eq:td-learning}). We still start by collecting
+sample transitions \((s, u, s', r)\) and initialize \(V^\pi_{\phi_0}(s)\). However,
+there is a small twist to make the training stable:
+
+\begin{equation}
+    \phi_\pi \leftarrow \arg \min_{\substack{\phi}} \dfrac{1}{m}\sum_{i=1}^{m}||r + \gamma V^\pi_\phi(s') - V^\pi_\phi(s)||_2^2 + \kappa ||\phi-\phi_i||_2^2
+    \label{eq:td_learning_reinforce}
+\end{equation}
+The second regularization term is used to prevent overfitting and thus unstability.
+
+Another method is to regress against empirical data. We first collect a set of trajectories \(\tau_i\), and then we try to fit a function \(V_\phi^\pi(s)\) to the data.
+
+\begin{equation}
+    \phi_\pi \leftarrow \arg \min_{\substack{\phi}} \dfrac{1}{m}\sum_{i=1}^{m}\sum_{t=0}^{H-1}\bigg(V^\pi_\phi(s^{(i)}_t) - \sum_{k=t}^{H-1}\gamma^{k-t}\mathcal{R}(s^{(i)}_k, u^{(i)}_k)\bigg)^2
+    \label{eq:value_function_approx}
+\end{equation}
+
+\subsubsection{REINFORCE}
+
+With everything in place, we are ready to see the algorithm.
+
+\begin{algorithm}
+    \caption{REINFORCE - Vanilla Policy Gradient}
+    \begin{algorithmic}
+        \STATE Initialize policy parameters \(\theta\), baseline \(b(s_t)\)
+        \FOR{each episode}
+            \STATE Generate a set of trajectories \(\tau_1, \tau_2, \ldots\)
+            \STATE At each time step of each trajectory, compute \(\mathcal{R}^{(i)}_t=\sum_{k=t}^{H-1}\gamma^{k-t}\mathcal{R}(s^{(i)}_k, u^{(i)}_k)\) and the
+            advantage estimate \(\hat{A}^{(i)}_t = \mathcal{R}^{(i)}_t - b(s^{(i)}_t)\)
+            \STATE Refit the baseline \(b(s_t)\) by minimizing \(||b(s_t)-R_t||^2\) summed over all time steps for all trajectories
+            \STATE Update policy parameters \(\theta\) by using gradient estimate \(\hat{g}\)
+        \ENDFOR
+    \end{algorithmic}
+\end{algorithm}
+
+Note that we use discount to increase the stability of the algorithm.
+
+Depending on how one refit \(b(s_t)\) and compute \(\hat{A}^{(i)}_t\), the algorithm can be different.
+
+\subsubsection{Actor-Critic Methods}
+
+We now extends to a family of RL algorithms called Actor-Critic methods. The
+\(\operatorname{REINFORCE}\) algorihtm uses Monte-Carlo methods. More specifically, it
+samples trajectories and estimate the gradient of the policy using the Monte-Carlo estimate of the return.
+This approach may still have high variance due to long-horizon task. To address this,
+we use the idea that we have seen in DQN - an evaluating function or critic.
+
+In short, Actor-Critic methods are RL algorithms that has two components: the actor (the policy that we used to
+interact with the environment) and the critic (the evaluating function that we used to evaluate the policy).
+
+\paragraph{General Actor-Critic algorithm}
+
+\begin{algorithm}
+    \caption{General Actor-Critic algorithm}
+    \begin{algorithmic}
+        \STATE Initialize \(\pi_{\theta_0}\) and \(V_{\phi_0}^\pi\)
+        \STATE Collect roll-outs \(\{(s_t, u_t, s_{t+1}, r_t)\}\) and compute \(\hat{Q}_i(s_t, u_t)\) for all time steps of all roll-outs
+        \STATE Update: \begin{itemize}
+            \item \(\theta_{T+1} \leftarrow \theta_T \alpha \dfrac{1}{m}\sum_{i=1}^{m}\sum_{t=0}^{H-1}\nabla\log\pi_{\theta_T}(u_t|s_t)(\hat{Q}_i(s_t, u_t)-V_{\phi_T}^\pi(s_t))\)
+            \item \(\phi_{T+1} \leftarrow \arg\min_{\substack{\phi}}\sum_{(s_t, u_t, s_{t+1}, r_t)}||\hat{Q}_i(s_t, u_t) - V_\phi^\pi(s_t)||_2^2 + \kappa ||\phi-\phi_i||_2^2\)
+        \end{itemize}
+        \STATE Repeat until convergence
+    \end{algorithmic}
+\end{algorithm}
+
+Some examples have been shown in the analysis in section \ref{sec:stablizing_techniques}. For example,
+Instead of using \(\mathcal{R}_t\), we can use \(Q^\pi(s_t, u_t)\) (see equation \ref{eq:actor-critic}) to examine how well the policy performs.
+There are some estimators for \(Q^\pi(s_t, u_t)\) that we can use, we will
+see some of the ways below as we inspect some variants of the REINFORCE algorithm that implements Actor-Critic methods.
+
+
+\paragraph{Asynchronous Advantage Actor-Critic: A2C and A3C} The core idea here is that 
+we can express \(Q^\pi(s_t, u_t)\) as \(Q^\pi(s_t, u_t) = \mathbb{E}_\tau[r_1+\gamma r_2+\cdots+\gamma^{H-1}r_H]\).
+But we have seen before that this can be simplified, with a parameter \(k\), as \(Q^\pi(s_t, u_t) = \mathbb{E}_\tau[r_1 + \gamma r_2 + \ldots \gamma r_{k-1} + \gamma^kV^\pi(s_{k+1})]\).
+That is, we'll look a head \(k\) steps to estimate the value of \(Q^\pi(s_t, u_t)\). To make it clearer,
+\begin{align}
+    \hat{Q}^{\pi, k}(s_t, u_t) &= r_1 + \gamma r_2 + \ldots \gamma r_{k-1} + \gamma^kV^\pi(s_{k+1}) \label{eq:a3c} \\
+    \mathcal{R}^{(i)}_t &= \hat{Q}^{\pi, k}(s^{(i)}_t, u^{(i)}_t) - V^\pi(s^{(i)}_t) \nonumber
+\end{align}
+
+\paragraph{Generalized Advantage Estimation: GAE} Using a somewhat similar idea to
+A3C, GAE extends the idea of A3C to have an exponentially decayed average to estimate the
+advantage function. To be more specific, given a parameter \(0 \leq \lambda < 1\), we have
+
+\begin{equation}
+    \hat{Q}^{\pi, \lambda}(s_t, u_t) = \sum_{k=t}^{H-1}(1-\lambda)\lambda^{k-t}\hat{Q}^{\pi, k}(s_t, u_t)
+    \label{eq:gae}
+\end{equation}
+where \(\hat{Q}^{\pi, k}(s_t, u_t)\) is the same as in equation \ref{eq:a3c}.
+
 \end{document}
