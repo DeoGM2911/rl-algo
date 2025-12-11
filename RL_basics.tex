@@ -803,4 +803,124 @@ advantage function. To be more specific, given a parameter \(0 \leq \lambda < 1\
 \end{equation}
 where \(\hat{Q}^{\pi, k}(s_t, u_t)\) is the same as in equation \ref{eq:a3c}.
 
+\subsection{Trust Region Policy Optimization (TRPO)}
+
+\subsubsection{REINFORCE drawbacks}
+
+REINFORCE has a few drawbacks. First, it is not stable. To be more specific,
+one can imagine this instability by looking over the over-stepping in supervised learning.
+In SL, if our learning rate is too high, we may over-step and our model performs even worse after the update.
+Similarly, if our update makes the policy worse, we will sample data from an even worse policy, which
+leads to even worse update. This will make the training unstable. 
+
+Second, it is not sample-efficient. Note that we collect a bunch of trajectories, but then only perform ONE
+updates. This means that we need to perform a lot of episodes in order to improve the policy.
+
+So, how can we address this?
+
+\subsubsection{Trust Region Policy Optimization}
+
+The core idea is to only perform a `small' step. To be more specific, we don't want
+outr policy to change radically. Consider the loss function in REINFORCE:
+
+\[
+    \mathcal{L}^{PG}(\theta) = \hat{\mathbb{E}}_{t}[\log\pi_\theta(u_t|s_t)\hat{A}_t]
+\]
+
+If an action has a large empirical advantage, the update may `overpush' the probability to 1.
+Similarly, if the empirical advantage is negative, the update may `overdecrease' the probability
+to 0. This leads to instability with the logarithm. Now, recall equation \ref{eq:utility_function_2}.
+This yields the same gradient that we use in REINFORCE. Of course, this doesn't change anything yet.
+However, notice this means we can use importance sampling. 
+
+Now, to the main idea: how do we incorporate the idea that the policy shouldn't change much? If one recalls,
+in statistics, we have a powerful tool called KL-divergence. Basically, it quantifies how
+different two probability distributions are from each other. From this, the problem is now an
+optimization problem:
+
+\[
+    \begin{aligned}
+        \text{maximize}_{\substack{\theta}} && \hat{\mathbb{E}}_t\bigg[\dfrac{\pi_\theta(u_t|s_t)}{\pi_{\theta_\text{old}}(u_t|s_t)}\hat{A}_t\bigg]\\
+        \text{subject to }&& D_{KL}(\pi_\theta(\cdot|s_t)\|\pi_{\theta_\text{old}}(\cdot|s_t)) \leq \delta
+    \end{aligned}
+\]
+
+That is, we now add the constraint that the KL-divergence between the old policy and the new policy should be small.
+Then, we have our algorithm:
+
+\begin{algorithm}
+    \caption{Trust Region Policy Optimization}
+    \begin{algorithmic}
+        \STATE Initialize \(\pi_{\theta_0}\)
+        \STATE Collect roll-outs \(\{(s_t, u_t, s_{t+1}, r_t)\}\) and compute \(\hat{A}_t\) for all time steps of all roll-outs
+        \STATE Find \(\theta\) which maximizes \(\hat{\mathbb{E}}_t\bigg[\dfrac{\pi_\theta(u_t|s_t)}{\pi_{\theta_\text{old}}(u_t|s_t)}\hat{A}_t\bigg]\)
+    subjected to \(D_{KL}(\pi_\theta(\cdot|s_t)\|\pi_{\theta_\text{old}}(\cdot|s_t)) \leq \delta\)
+        \STATE Repeat until convergence
+    \end{algorithmic}
+\end{algorithm}
+
+There are a number of ways one can solve the optimization problem and one can search about this online. I won't go into
+details here (Check `Natural Policy Gradient' or `Conjugate Gradient' for more details). 
+
+There are two prominent variants of TRPO: KFAC, which leads to ACKTR, and the penalized KL.
+For the first one, I recommend reading the paper. For the second one, the idea is quite simple - adding the constraint
+to the objective:
+\[
+    \begin{aligned}
+        \text{maximize}_{\substack{\theta}} && \hat{\mathbb{E}}_t\bigg[\dfrac{\pi_\theta(u_t|s_t)}{\pi_{\theta_\text{old}}(u_t|s_t)}\hat{A}_t - \beta D_{KL}(\pi_\theta(\cdot|s_t)\|\pi_{\theta_\text{old}}(\cdot|s_t))\bigg]
+    \end{aligned}
+\]
+where \(\beta\) is a hyperparameter that controls how much we care about the KL-divergence. There are also
+methods to solve this, one of the is the linear-quadratic approximation. This leads to a different TRPO algorithm
+
+\begin{algorithm}
+    \caption{KL-penalized TRPO}
+    \begin{algorithmic}
+        \STATE Initialize \(\pi_{\theta_0}\)
+        \STATE Collect roll-outs \(\{(s_t, u_t, s_{t+1}, r_t)\}\) and compute \(\hat{A}_t\) for all time steps of all roll-outs
+        \STATE Find \(\theta\) which maximizes \(\hat{\mathbb{E}}_t\bigg[\dfrac{\pi_\theta(u_t|s_t)}{\pi_{\theta_\text{old}}(u_t|s_t)}\hat{A}_t - \beta D_{KL}(\pi_\theta(\cdot|s_t)\|\pi_{\theta_\text{old}}(\cdot|s_t))\bigg]\)
+        \STATE If the KL-divergence is too large, increase \(\beta \leftarrow 1.5\beta\). If it's too low, decrease \(\beta \leftarrow \beta/1.5\)
+        \STATE Repeat until convergence
+    \end{algorithmic}
+\end{algorithm}
+The coefficients \(1.5\) and \(\dfrac{1}{1.5}\) are well-tuned hyperparameters found by the original authors.  
+
+Now, as a reality check, note that:
+\begin{itemize}
+    \item If we remove the constraint (or the penalty), we have our policy iteration (start with some policy, evaluate, improve, repeat)
+    \item If we replace the KL-divergence penalty with L2-regularization, we arrive at our REINFORCE algorithm.
+\end{itemize}
+
+\subsubsection{Proximal Policy Optimization}
+
+Note that the idea in TRPO is great, however, solving the optimization problem is not
+easy and fast. To make the implementation easier (and faster), we have Proximal Policy Optimization (PPO).
+The idea is very staightforward. Instead of have a KL-penalty or constraint to keep the policies close to each other,
+we instead clip the value of the ratio \(r_t(\theta) = \dfrac{\pi_\theta(u_t|s_t)}{\pi_{\theta_\text{old}}(u_t|s_t)}\). More specifically,
+the loss is 
+
+\begin{equation}
+    \mathcal{L}^{CLIP}(\theta) = \hat{\mathbb{E}}_t[\min(r_t(\theta)\hat{A}_t, \text{clip}(r_t(\theta), 1-\epsilon, 1+\epsilon)\hat{A}_t)]
+    \label{eq:clip_loss}
+\end{equation}
+where \(\epsilon\) is a hyperparameter. Now, the full loss function does include an entropy 
+term for exploration and a value function term for stability. The loss in that case is
+\begin{equation}
+    \mathcal{L}^{PPO}(\theta) = \hat{\mathbb{E}}_t\bigg[\min(r_t(\theta)\hat{A}_t, \text{clip}(r_t(\theta), 1-\epsilon, 1+\epsilon)\hat{A}_t)\bigg] + c_1\hat{\mathbb{E}}_t[(V_\theta(s_t) - R_t)^2] + c_2S_{\pi_\theta}(s_t)
+    \label{eq:ppo_loss}
+\end{equation}
+where \(R_t\) is the return at time \(t\) and \(c_1, c_2\) are hyperparameters.
+
+\begin{algorithm}
+    \caption{PPO}
+    \begin{algorithmic}
+        \STATE Initialize \(\pi_{\theta_0}\)
+        \STATE Collect roll-outs \(\{(s_t, u_t, s_{t+1}, r_t)\}\) and compute \(\hat{A}_t\) for all time steps of all roll-outs
+        \STATE Sample some batches of data from the roll-outs.
+        \STATE Find \(\theta\) which maximizes \(\hat{\mathbb{E}}_t\bigg[\min(r_t(\theta)\hat{A}_t, \text{clip}(r_t(\theta), 1-\epsilon, 1+\epsilon)\hat{A}_t)\bigg] + c_1\hat{\mathbb{E}}_t[(V_\theta(s_t) - R_t)^2] + c_2S_{\pi_\theta}(s_t)\). This can be done with SGD.
+        \STATE Repeat until convergence
+    \end{algorithmic}
+\end{algorithm}
+
+Note that we now use the data much more efficient and the implementation is rather straight forward.
 \end{document}
