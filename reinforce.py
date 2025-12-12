@@ -39,7 +39,7 @@ class PolicyLoss(nn.Module):
         out = torch.zeros(len(lengths), dtype=grads.dtype)
         out = out.index_add(0, eps_ids, grads)
 
-        return torch.mean(out)
+        return -torch.mean(out)  # - to maximize returns
 
 
 class REINFORCE:
