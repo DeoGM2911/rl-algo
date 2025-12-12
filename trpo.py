@@ -25,11 +25,50 @@ class TRPOLoss(PolicyLoss):
 
 
 class TRPO(REINFORCE):
-    def __init__(self, env, policy, state_dim, episode_len, gamma=0.99, lr=0.001, beta=2, KL_clip_max=0.2, KL_clip_min=0.1, num_batches=5):
+    r"""
+    TRPO algorithm with penalty and GAE with k steps returns estimate. One small note is that I opt to
+    optimize by GD instead of other methods involving approximating the KL divergence or using the 
+    conjugate gradient method.
+
+    Args:
+        env (gymnasium.Env): The environment to use.
+        policy (Policy): The policy to use.
+        state_dim (int): The dimension of the state space.
+        episode_len (int): The length of the episode.
+        gamma (float, optional): The discount factor. Defaults to 0.99.
+        lambda_ (float, optional): The lambda parameter for GAE. Defaults to 0.95.
+        k (int, optional): The number of steps to look ahead for returns. Defaults to None, meaning look ahead to the end of the episode.
+        lr (float, optional): The learning rate. Defaults to 0.001.
+        beta (float, optional): The penalty parameter. Defaults to 2.
+        KL_clip_max (float, optional): The maximum value of the KL divergence. Defaults to 0.2.
+        KL_clip_min (float, optional): The minimum value of the KL divergence. Defaults to 0.1.
+        num_batches (int, optional): The number of batches to use. Defaults to 5.
+    
+    For those who's trying to understand the GAE calculation in self._play_episode, here's what the large block of calculation means:
+
+    We first `tensorized` the rewards [r1, r2, r3, ...]. Then we introduce a discount lower-triangle matrix which looks like
+    ```
+    [[1   0   0   0   0  ]
+     [1   l   0   0   0  ]
+     [1   l   l^2 0   0  ]
+     [1   l   l^2 l^3 0  ]
+     [1   l   l^2 l^3 l^4]]
+    ```
+
+    Then, we also compute the value function estimate [v2, v3, v4, ..., v_(timestep-1), 0]. We don't compute V(s1) since we don't need it
+    and we pad 0 to account for when we look ahead the entire epsiode. We also have a discount array which is the discount factor for 
+    the value functions. Lastly, we have a lambda decay array which is the lambda parameter for GAE.
+
+    Now, one can verify that, given our look-ahead param k, we correctly compute R_t for each t=1...timestep. 
+    
+    """
+    def __init__(self, env, policy, state_dim, episode_len, gamma=0.99, lambda_ = 0.95, k=None, lr=0.001, beta=2, KL_clip_max=0.2, KL_clip_min=0.1, num_batches=5):
         super(TRPO, self).__init__(env, policy, state_dim, episode_len, gamma, lr)
         
         self.KL_clip_max = KL_clip_max
         self.KL_clip_min = KL_clip_min
+        self.lambda_ = lambda_
+        self.k = k
         self.num_batches = num_batches
         self.policy_loss = TRPOLoss(beta)
         self.policy_old = Policy(state_dim, env.action_space.n)
@@ -64,13 +103,45 @@ class TRPO(REINFORCE):
             state = next_state
             steps += 1
         
-        # Compute the return
-        returns = [rewards[-1]]
-        for r in reversed(rewards[:-1]):
-            returns.append(r + self.gamma * returns[-1])
+        #* Compute returns directly
+        # returns = [rewards[-1]]
+        # for r in reversed(rewards[:-1]):
+        #     returns.append(r + self.gamma * returns[-1])
         
-        # Reverse the returns array
-        returns = returns[::-1]
+        #* Compute the return in the GAE methods with k steps forward 
+        # Convert all to tensors for performance
+        timestep = len(states)
+        # If no k is provided, use the entire episode
+        if self.k is None:
+            self.k = timestep
+
+        rewards = torch.tensor(rewards, dtype=torch.float32)
+        lambda_decay = (1 - self.lambda_) * torch.tensor([self.lambda_ ** i for i in range(len(rewards))], dtype=torch.float32)
+        # Ignore the first state
+        value_funcs = self.baseline(torch.stack(states[1:])).view(-1)
+        # Pad the last entry with 0
+        value_funcs = torch.cat([value_funcs, torch.zeros(1)], dim=0)
+
+        # Plus 1 to ensure same shape as value_funcs
+        value_discounts = torch.tensor([self.gamma ** i for i in range(1, len(rewards)+1)], dtype=torch.float32)
+        discounts = torch.tril(
+            self.gamma ** (torch.arange(timestep, dtype=torch.float32).unsqueeze(1) - torch.arange(timestep, dtype=torch.float32).unsqueeze(0))
+        )
+
+        returns = []
+        for i in range(len(rewards)):
+            # Indices to avoid index errors
+            end_idx = min(timestep-i, self.k)
+            
+            returns.append(
+                torch.sum(
+                    lambda_decay[:end_idx] * \
+                    (torch.sum(
+                        rewards[i:i+end_idx].view(1, -1) * discounts[:end_idx, :end_idx], dim=-1
+                    ) + \
+                    value_discounts[i:i+end_idx] * value_funcs[i:i+end_idx])
+                ).item()
+            )
         
         return states, action_logits, actions, returns, len(states)
     
@@ -150,5 +221,5 @@ class TRPO(REINFORCE):
 if __name__ == "__main__":
     env = gym.make("CartPole-v1")
     policy = Policy(env.observation_space.shape[0], env.action_space.n)
-    agent = TRPO(env, policy, env.observation_space.shape[0], episode_len=500)
-    agent.train(10)
+    agent = TRPO(env, policy, env.observation_space.shape[0], episode_len=5, k=3)
+    agent.train(1)
