@@ -734,7 +734,7 @@ Another method is to regress against empirical data. We first collect a set of t
 
 With everything in place, we are ready to see the algorithm.
 
-\begin{algorithm}
+\begin{algorithm}[H]
     \caption{REINFORCE - Vanilla Policy Gradient}
     \begin{algorithmic}
         \STATE Initialize policy parameters \(\theta\), baseline \(b(s_t)\)
@@ -765,7 +765,7 @@ interact with the environment) and the critic (the evaluating function that we u
 
 \paragraph{General Actor-Critic algorithm}
 
-\begin{algorithm}
+\begin{algorithm}[H]
     \caption{General Actor-Critic algorithm}
     \begin{algorithmic}
         \STATE Initialize \(\pi_{\theta_0}\) and \(V_{\phi_0}^\pi\)
@@ -848,7 +848,7 @@ optimization problem:
 That is, we now add the constraint that the KL-divergence between the old policy and the new policy should be small.
 Then, we have our algorithm:
 
-\begin{algorithm}
+\begin{algorithm}[H]
     \caption{Trust Region Policy Optimization}
     \begin{algorithmic}
         \STATE Initialize \(\pi_{\theta_0}\)
@@ -873,7 +873,7 @@ to the objective:
 where \(\beta\) is a hyperparameter that controls how much we care about the KL-divergence. There are also
 methods to solve this, one of the is the linear-quadratic approximation. This leads to a different TRPO algorithm
 
-\begin{algorithm}
+\begin{algorithm}[H]
     \caption{KL-penalized TRPO}
     \begin{algorithmic}
         \STATE Initialize \(\pi_{\theta_0}\)
@@ -911,7 +911,7 @@ term for exploration and a value function term for stability. The loss in that c
 \end{equation}
 where \(R_t\) is the return at time \(t\) and \(c_1, c_2\) are hyperparameters.
 
-\begin{algorithm}
+\begin{algorithm}[H]
     \caption{PPO}
     \begin{algorithmic}
         \STATE Initialize \(\pi_{\theta_0}\)
@@ -924,5 +924,58 @@ where \(R_t\) is the return at time \(t\) and \(c_1, c_2\) are hyperparameters.
 
 Note that we now use the data much more efficient and the implementation is rather straight forward.
 
+\subsubsection{Group Relative Policy Optimization}
 
+While we 're still talking about PPO, let's talk about a variant called Group Relative Policy Optimization (GRPO).
+Basically, PPO still has the drawback of other older policy optimization algorithm: the baseline is expensive to compute.
+GRPO try to solve this by instead of using a value function approximation baseline, it uses the average return of some groups of trajectories.
+This is much clearer when we talk about finetuning LLMs. Now, imagine the state being the prompt/question in some dataset.
+Then our trajectory is the output of the model. Then, our data for RL is obtained by sampling a batch of questions from
+the dataset, then generate some outputs for each question, and do something with them. To make it clearer, let's first see
+the algorithm itself:
+
+\begin{algorithm}[H]
+    \caption{Iterative Group Relative Policy Optimization}
+    \begin{algorithmic}
+        \REQUIRE reward model \(R_\phi\), reference model \(\pi_{\text{ref}}\), policy \(\pi_{\theta_0}\), dataset \(\mathcal{D}\)
+        \STATE Initialize \(\pi_{\theta_0}\), \(\pi_{\text{ref}}\), and \(\pi_{\theta_{\text{old}}}\)
+        \FOR{some number of epochs}
+        \FOR{some number of iterations}
+        \STATE Sample a batch of questions \(\{q_1, q_2, \ldots, q_N\}\) from \(\mathcal{D}\)
+        \STATE Generate \(G\) outputs \(o_1, o_2, \ldots, o_G\) for each question based on \(\pi_{\theta_{\text{old}}}\).
+        \STATE For each question \(q_i\), compute the reward \(r_j\) for each output \(o_j\) based on \(R_\phi\). 
+        \STATE Compute the advantage \(A_j\) for each output \(o_j\): \(A_j = \dfrac{r_j - \mu_i}{\sigma_i}\) where \(\mu_i\) and \(\sigma_i\) are the mean and standard deviation of the rewards of the outputs for question \(q_i\).
+        \STATE Maximize the following objective:
+        \[
+            \hat{\mathbb{E}}_{q\sim\mathcal{D}, o_j \sim \pi_{\theta_\text{old}}}
+            \bigg[
+                    \dfrac{1}{G}\sum_{j=1}^{G}
+                    \min\bigg(\dfrac{\pi_{\theta_\text{old}}(o_j|q_i)}{\pi_{\text{ref}}(o_j|q_i)}A_j,
+                    \text{clip}\bigg(\dfrac{\pi_{\theta_\text{old}}(o_j|q_i)}{\pi_{\text{ref}}(o_j|q_i)}, 1-\epsilon, 1+\epsilon\bigg)A_j
+                \bigg)
+                - \beta \hat{D}_{KL}(\pi_{\theta_\text{old}}\|\pi_{\text{ref}})
+            \bigg]
+        \] using SGD or Adam.
+        \ENDFOR
+        \STATE Update \(\pi_{\theta_\text{old}} \leftarrow \pi_{\theta}\)
+        \ENDFOR
+    \end{algorithmic}
+\end{algorithm}
+
+Now, a few clarification on the algorithm. First, we use a different objective
+compared to PPO. Note that part of it is actually still \(\mathcal{L}^{PPO}(\theta)\). However,
+we also add a KL-divergence penalty to ensure the policies are to a reference model. All of these is for
+the goal of stablizing training since the generated output may be long, which means there're a lot of noises.
+
+Second, we use a different baseline. Instead of using a value function approximation, we use the average
+reward of the outputs for each question. This is much cheaper to compute and still achieve good results empirically.
+As you can tell, this is also why this is called `group relative.' We also normalize the advantage for
+stability.
+
+Lastly, we approximate the KL-divergence by:
+\[
+    \hat{D}_{KL}(\pi_{\theta_\text{old}}\|\pi_{\text{ref}}) = \hat{\mathbb{E}}_{q\sim\mathcal{D}, o_j \sim \pi_{\theta_\text{old}}}\bigg[\dfrac{\pi_{\theta_\text{old}}(o_j|q_i)}{\pi_{\text{ref}}(o_j|q_i)} - \log \dfrac{\pi_{\theta_\text{old}}(o_j|q_i)}{\pi_{\text{ref}}(o_j|q_i)} - 1\bigg]
+\] 
+Note that the reference model \(\pi_{\text{ref}}\) is different from \(\pi_{\theta_\text{old}}\). Please note that this method is
+mostly used to finetune LLMs.
 \end{document}

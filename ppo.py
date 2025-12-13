@@ -48,6 +48,9 @@ class PPO(TRPO):
                 # Detach to avoid policy network backprop through the baseline network
                 advantages = (returns - baselines.view(-1)).detach()
 
+                # Normalize the advantages
+                advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
                 # Refit the baseline
                 baseline_loss = self.baseline_criterion(baselines.view(-1), returns)
                 baseline_loss.backward()
