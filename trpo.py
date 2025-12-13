@@ -2,6 +2,7 @@ import gymnasium as gym
 import torch
 from torch import nn, optim
 from torch.distributions import Categorical
+from copy import deepcopy
 
 # Reuse some code for convenience
 from reinforce import REINFORCE, Policy, PolicyLoss, feature_extractor
@@ -13,7 +14,11 @@ class TRPOLoss(PolicyLoss):
         self.beta = beta
     
     def forward(self, action_logits_old, actions_logits, actions, advantages, lengths):
-        grads = super().forward(actions, advantages, lengths)
+        grads = super().forward(
+            torch.gather(actions_logits, dim=1, index=actions.view(-1, 1)).view(-1),
+            advantages, 
+            lengths
+        )
         
         # Compute the KL penalty
         kl = torch.distributions.kl.kl_divergence(\
@@ -71,7 +76,7 @@ class TRPO(REINFORCE):
         self.k = k
         self.num_batches = num_batches
         self.policy_loss = TRPOLoss(beta)
-        self.policy_old = Policy(state_dim, env.action_space.n)
+        self.policy_old = deepcopy(self.policy)
         self.policy_old.load_state_dict(self.policy.state_dict())
 
     def _play_episode(self, num_iter):
@@ -94,7 +99,7 @@ class TRPO(REINFORCE):
             states.append(state)
             # Store probability of the chosen action (for log prob calculation)
             action_logits.append(logits)
-            actions.append(probs[action])
+            actions.append(action)
             rewards.append(reward)
             
             if terminated or truncated:
@@ -159,12 +164,12 @@ class TRPO(REINFORCE):
             actions.extend(eps_actions)
             returns.extend(eps_returns)
             eps_lens.append(eps_len)
-
+        
         # Stack the states, action logits and returns
         lengths = torch.tensor(eps_lens)
         states = torch.stack(states)
         action_logits = torch.stack(action_logits)
-        actions = torch.stack(actions)
+        actions = torch.tensor(actions)
         returns = torch.tensor(returns, dtype=torch.float32)
 
         return states, action_logits, actions, returns, lengths 
